@@ -1,0 +1,32 @@
+name: presence-core
+
+# CORTEX green-online daemon. Jobs overlap by design:
+# schedule every 3h + job lifetime ~5h55m ⇒ at any moment at least one
+# live gateway session holds the green dot. No concurrency group so two
+# sessions may overlap seamlessly at handover.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */3 * * *"
+
+jobs:
+  presence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install presence deps
+        run: npm install ws --no-audit --no-fund
+
+      - name: Hold the green dot
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_PRESENCE_TEXT: "PROTECTING THE CORTEX NETWORK"
+          DISCORD_PRESENCE_TYPE: "3"
+        run: node presence-core.mjs

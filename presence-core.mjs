@@ -15,7 +15,14 @@ import http from 'node:http';
 const TOKEN = (process.env.DISCORD_BOT_TOKEN || '').trim();
 const STATUS_TEXT = process.env.DISCORD_PRESENCE_TEXT || 'PROTECTING THE CORTEX NETWORK';
 const STATUS_TYPE = Number(process.env.DISCORD_PRESENCE_TYPE || 0); // 0=PLAYING 2=LISTENING 3=WATCHING
-const GUILDS_INTENT = 1 << 0;
+// GUILDS (1<<0) + GUILD_MEMBERS (1<<1) — GUILD_MEMBERS is a privileged intent,
+// allowed because the application carries the GUILD_MEMBERS_LIMITED flag
+// (portal toggle on, small-bot tier). It powers the automated welcome pipeline.
+const INTENT_BITS = (1 << 0) | (1 << 1);
+const WELCOME_URL = (process.env.CORTEX_WELCOME_URL || 'https://cortex-ac.vercel.app/api/welcome').trim().replace(/\/+$/, '');
+const WELCOME_KEY = (process.env.CORTEX_TRIGGER_KEY || '').trim();
+const WELCOME_CHANNEL_ID = process.env.CORTEX_WELCOME_CHANNEL_ID || '1561256250585645127';
+const OWNER_ID = process.env.DISCORD_OWNER_ID || '1261697605335908455';
 
 if (!TOKEN) {
   console.error('[presence] FATAL: DISCORD_BOT_TOKEN missing');
@@ -68,7 +75,7 @@ function startHeartbeat(interval) {
 function identify() {
   send(2, {
     token: TOKEN,
-    intents: GUILDS_INTENT,
+    intents: INTENT_BITS,
     presence: {
       status: 'online',
       since: null,
@@ -81,6 +88,42 @@ function identify() {
       device: 'CortexPresenceCore',
     },
   });
+}
+
+// ── Automated welcome pipeline: member joins → Vercel welcome endpoint → HUD V4 card
+async function triggerWelcome(memberData) {
+  const uid = memberData?.user?.id;
+  if (!uid) return;
+  if (memberData?.user?.bot) return; // never induct bots
+
+  const sep = WELCOME_URL.includes('?') ? '&' : '?';
+  const qs = new URLSearchParams({ user_id: uid, joined_via: 'live' });
+  if (WELCOME_KEY) qs.set('key', WELCOME_KEY);
+  try {
+    const r = await fetch(`${WELCOME_URL}${sep}${qs.toString()}`, { method: 'POST' });
+    const t = await r.text();
+    console.log(`[welcome] join ${uid} → card endpoint ${r.status} ${(t || '').slice(0, 140)}`);
+  } catch (e) {
+    console.warn('[welcome] card endpoint call failed:', e.message);
+  }
+
+  // Explicit owner ping on top (beeboo sees every induction immediately)
+  try {
+    const guild = memberData?.guild_id;
+    if (!guild) return;
+    const j = JSON.stringify({
+      content: `🛡️ <@${OWNER_ID}> — <@${uid}> just joined the network and was auto-inducted by the Cortex presence core.`,
+      allowed_mentions: { users: [OWNER_ID, uid].filter(Boolean) },
+    });
+    const r = await fetch(`https://discord.com/api/v10/channels/${WELCOME_CHANNEL_ID}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bot ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: j,
+    });
+    console.log(`[welcome] owner ping for ${uid} → ${r.status}`);
+  } catch (e) {
+    console.warn('[welcome] owner ping failed:', e.message);
+  }
 }
 
 function resume() {
@@ -123,6 +166,9 @@ function connectOnce() {
               connectedSince = Date.now();
               console.log(`[presence] GREEN ONLINE — session ${sessionId} at ${new Date().toISOString()}`);
               console.log(`[presence] bot ${d.user?.username} registered as online.`);
+              console.log('[presence] automated welcome listener active (GUILD_MEMBERS).');
+            } else if (t === 'GUILD_MEMBER_ADD') {
+              triggerWelcome(d);
             }
             break;
           case 7: // Discord requests reconnect

@@ -37,4 +37,6 @@ jobs:
           DISCORD_PRESENCE_TEXT: "PROTECTING THE CORTEX NETWORK"
           DISCORD_PRESENCE_TYPE: "3"
           GATEWAY_CONNECT_DEADLINE_MS: "60000"
+          CORTEX_WELCOME_URL: "https://cortex-ac.vercel.app/api/welcome"
+          CORTEX_TRIGGER_KEY: ${{ secrets.CORTEX_TRIGGER_KEY }}
         run: node presence-core.mjs

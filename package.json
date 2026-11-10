@@ -7,6 +7,6 @@
     "start": "node presence-core.mjs"
   },
   "dependencies": {
-    "ws": "^8.22.0"
+    "ws": "^8.22.2"
   }
 }

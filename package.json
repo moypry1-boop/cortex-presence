@@ -1,0 +1,12 @@
+{
+  "name": "cortex-presence-core",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node presence-core.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}

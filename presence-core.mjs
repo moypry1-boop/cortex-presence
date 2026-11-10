@@ -28,6 +28,10 @@ let resumeUrl = null;
 let ws = null;
 let heartbeatTimer = null;
 let connectedSince = 0;
+let lastOutcome = 'boot';
+// Optional fail-fast watchdog: exit nonzero if no READY within the deadline
+// (so CI surfaces the true error in logs instead of looping forever).
+const CONNECT_DEADLINE_MS = Number(process.env.GATEWAY_CONNECT_DEADLINE_MS || 0);
 
 console.log('==============================================================');
 console.log(' CORTEX PRESENCE CORE — green-online daemon booting');
@@ -91,6 +95,7 @@ function connectOnce() {
       try {
         url = await getGatewayUrl();
       } catch (e) {
+        lastOutcome = 'gateway-fetch-failed';
         console.warn('[presence] gateway fetch failed:', e.message);
         return resolve(false);
       }
@@ -132,8 +137,8 @@ function connectOnce() {
         }
       });
 
-      ws.on('close', (code) => resolve(`close ${code}`));
-      ws.on('error', (e) => resolve(`error ${e.message}`));
+      ws.on('close', (code) => { lastOutcome = `close ${code}`; resolve(lastOutcome); });
+      ws.on('error', (e) => { lastOutcome = `error ${e.message}`; resolve(lastOutcome); });
     })();
   });
 }
@@ -142,10 +147,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async function supervisor() {
   let delay = 3000;
+
+  // Fail-fast watchdog (CI mode): no READY within deadline → exit 2 so the
+  // job visibly fails and the true error lands in the logs immediately.
+  if (CONNECT_DEADLINE_MS > 0) {
+    const bootAt = Date.now();
+    const watchdog = setInterval(() => {
+      if (connectedSince > 0) { clearInterval(watchdog); return; }
+      if (Date.now() - bootAt > CONNECT_DEADLINE_MS) {
+        console.error(`[presence] FATAL: no READY within ${CONNECT_DEADLINE_MS}ms — last outcome: ${lastOutcome}`);
+        process.exit(2);
+      }
+    }, 3000);
+  }
+
   while (true) {
     const outcome = await connectOnce();
     clearInterval(heartbeatTimer);
-    console.log(`[presence] session dropped (${outcome ?? 'unknown'}) — reconnecting in ${Math.round(delay / 1000)}s`);
+    console.log(`[presence] session dropped (${outcome ?? lastOutcome}) — reconnecting in ${Math.round(delay / 1000)}s`);
     await sleep(delay + Math.random() * 1000);
     delay = Math.min(delay * 1.6, 30000);
     if (outcome && outcome.startsWith('close 1000')) delay = 3000; // clean close → fast retry

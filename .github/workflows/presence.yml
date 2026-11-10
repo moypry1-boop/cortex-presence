@@ -24,9 +24,17 @@ jobs:
       - name: Install presence deps
         run: npm install ws --no-audit --no-fund
 
+      - name: Diagnose credentials (no secrets printed)
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: |
+          echo "token_length=${#DISCORD_BOT_TOKEN} (expected 70)"
+          node -e "const t=process.env.DISCORD_BOT_TOKEN;fetch('https://discord.com/api/v10/users/@me',{headers:{Authorization:'Bot '+t}}).then(async r=>{const j=await r.json().catch(()=>null);console.log('users/@me ->',r.status, j&&j.username?('user='+j.username+'#'+(j.discriminator||'0')):JSON.stringify(j))})"
+
       - name: Hold the green dot
         env:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_PRESENCE_TEXT: "PROTECTING THE CORTEX NETWORK"
           DISCORD_PRESENCE_TYPE: "3"
+          GATEWAY_CONNECT_DEADLINE_MS: "60000"
         run: node presence-core.mjs
